@@ -1,5 +1,5 @@
 def main():
-    print("Hello from gh-repo-summerizer!")
+    print("Hello from gh-repo-summerizer! yay")
 
 
 if __name__ == "__main__":
