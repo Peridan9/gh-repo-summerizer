@@ -4,6 +4,8 @@ from typing import Dict, Any, List, Optional
 import argparse, json, os, re
 from .github import list_user_repos, get_languages, get_readme
 from .summarizer import get_summarizer, basic_summary, _clean_markdown
+from .config import load_settings
+
 
 def _excerpt(text: str, word_limit: int = 500) -> str:
     """
@@ -49,11 +51,11 @@ def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     """
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
-def summarize_repo(owner: str, repo: Dict[str, Any], include_langs: bool, readme_mode: str,
-                   summarizer_kind: str = "basic", model_name: str | None = None) -> Dict[str, Any]:
+def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str,
+                   summarizer_obj=None, summarizer_kind: str = "basic", model_name: str | None = None) -> dict:
     name = repo["name"]
     description = repo.get("description") or ""
-    item: Dict[str, Any] = {"name": name, "url": repo.get("html_url"), "description": description}
+    item = {"name": name, "url": repo.get("html_url"), "description": description}
 
     if include_langs:
         from .github import get_languages
@@ -70,14 +72,13 @@ def summarize_repo(owner: str, repo: Dict[str, Any], include_langs: bool, readme
             key = "readme" if readme_mode == "full" else "readme_excerpt"
             item[key] = readme_text
 
-    # ---- NEW: produce 3–5 line summary into item["summary"] ----
-    summarizer = get_summarizer(summarizer_kind, model=model_name) if summarizer_kind != "basic" else None
+    # Build 3–5 line summary
     base_text = readme_text or description
     if base_text:
-        if summarizer is None:
+        if summarizer_obj is None:  # "basic" path
             item["summary"] = basic_summary(name, base_text, description)
         else:
-            item["summary"] = summarizer.summarize(name, base_text, description)
+            item["summary"] = summarizer_obj.summarize(name, base_text, description)
 
     return item
 
@@ -122,18 +123,42 @@ def main() -> None:
                help="Summary engine. 'basic' (no LLM) or 'ollama' (local).")
     p.add_argument("--model", default="llama3.2:3b",
                help="Model name for ollama (default: llama3.2:3b). Ignored for basic.")
-    
+    p.add_argument("--config", help="Path to config.toml (defaults to ./config.toml if present)")
+
     args = p.parse_args()
 
+    # Load config.toml (if present) + env defaults
+    s = load_settings(args.config or "config.toml")
+
+    # Effective settings (CLI > env/config > code defaults)
+    summarizer_kind = args.summarizer or s.summarizer_kind
+    model_name = args.model or s.model
+    num_ctx = s.num_ctx
+    base_url = s.ollama_base_url
+    prompt_template = s.prompt_template
+
+    summarizer_obj = None
+    if summarizer_kind != "basic":
+        summarizer_obj = get_summarizer(
+            summarizer_kind,
+            model=model_name,
+            num_ctx=num_ctx,
+            base_url=base_url,
+            prompt_template=prompt_template,
+        )
+
+    # Readme mode and flags remain from your CLI (args.readme, args.full, etc.)
+
     repos = list_user_repos(args.username, include_forks=args.include_forks, include_archived=args.include_archived)
-    # include_langs = args.full  # keep old behavior for languages
+
     items = [
         summarize_repo(
             args.username, r,
             include_langs=args.full,
             readme_mode=args.readme,
-            summarizer_kind=args.summarizer,
-            model_name=args.model,
+            summarizer_obj=summarizer_obj,
+            summarizer_kind=summarizer_kind,
+            model_name=model_name,
         )
         for r in repos
     ]

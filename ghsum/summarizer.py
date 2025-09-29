@@ -4,6 +4,13 @@ import httpx
 import os
 import re
 
+def render_prompt(template: str | None, repo_name: str, base_text: str, description: str) -> str:
+    if template:
+        # simple Python format placeholders
+        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "")
+    # fallback to the built-in prompt
+    return build_prompt(repo_name, base_text, description)
+
 def _clean_markdown(text: str) -> str:
     """
     Remove common markdown noise but keep the full text.
@@ -73,17 +80,17 @@ def basic_summary(repo_name: str, base_text: str, description: str = "") -> str:
 # ---- Ollama (local) summarizer ---------------------------------------------
 
 class OllamaSummarizer:
-    """
-    Calls a local Ollama server (default http://localhost:11434) using /api/generate.
-    Install & run: https://ollama.com
-    """
-    def __init__(self, model: str = "llama3.2:3b", base_url: str = "http://localhost:11434", num_ctx: int = 8192):
+    def __init__(self, model: str = "llama3.2:3b",
+                 base_url: str = "http://localhost:11434",
+                 num_ctx: int = 8192,
+                 prompt_template: str | None = None):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.num_ctx = int(num_ctx)
+        self.prompt_template = prompt_template
 
     def summarize(self, repo_name: str, base_text: str, description: str = "") -> str:
-        prompt = build_prompt(repo_name, base_text, description)
+        prompt = render_prompt(self.prompt_template, repo_name, base_text, description)
         payload = {
             "model": self.model,
             "prompt": prompt,

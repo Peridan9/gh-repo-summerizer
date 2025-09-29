@@ -1,0 +1,12 @@
+You are a concise technical writer. Summarize this repository for a personal site / resume.
+
+Constraints:
+- 3–5 lines (60–120 words total).
+- Explain WHAT it does, HOW at a high level, and key TECH.
+- Neutral technical tone. No hype/emojis/markdown.
+
+Repository name: {repo_name}
+Existing one-line description (may be empty): {description}
+
+Text:
+{text}
