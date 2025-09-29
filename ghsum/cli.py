@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import argparse, json, os, re
 from .github import list_user_repos, get_languages, get_readme
+from .summarizer import get_summarizer, basic_summary, _clean_markdown
 
 def _excerpt(text: str, word_limit: int = 500) -> str:
     """
@@ -34,26 +35,6 @@ def _excerpt(text: str, word_limit: int = 500) -> str:
     words = raw.split()
     return " ".join(words[:word_limit]).strip()
 
-def _clean_markdown(text: str) -> str:
-    """
-    Remove common markdown noise but keep the full text.
-
-    Args:
-        text (str): The input markdown text.
-
-    Returns:
-        str: The cleaned text without markdown.
-    """
-    lines = [ln for ln in text.splitlines() if not re.search(r"!\[.*\]\(.*\)", ln)]
-    raw = "\n".join(lines)
-    # [text](url) -> text
-    raw = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", raw)
-    # strip code fences and inline code
-    raw = re.sub(r"`{3}.*?`{3}", "", raw, flags=re.S)
-    raw = re.sub(r"`([^`]+)`", r"\1", raw)
-    # strip leading hashes in headings (keep the heading text)
-    raw = re.sub(r"^\s*#+\s*", "", raw, flags=re.M)
-    return raw.strip()
 
 def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     """
@@ -68,25 +49,35 @@ def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     """
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
-def summarize_repo(owner: str, repo: Dict[str, Any], include_langs: bool, readme_mode: str) -> Dict[str, Any]:
+def summarize_repo(owner: str, repo: Dict[str, Any], include_langs: bool, readme_mode: str,
+                   summarizer_kind: str = "basic", model_name: str | None = None) -> Dict[str, Any]:
     name = repo["name"]
-    item: Dict[str, Any] = {
-        "name": name,
-        "url": repo.get("html_url"),
-        "description": repo.get("description") or "",
-    }
+    description = repo.get("description") or ""
+    item: Dict[str, Any] = {"name": name, "url": repo.get("html_url"), "description": description}
 
     if include_langs:
+        from .github import get_languages
         langs = get_languages(owner, name)
         item["languages"] = _top_langs(langs)
 
+    # readme_mode: "none" | "excerpt" | "full"
+    readme_text = None
     if readme_mode != "none":
-        readme = get_readme(owner, name)
-        if readme:
-            if readme_mode == "full":
-                item["readme"] = _clean_markdown(readme)   # <-- full text
-            else:
-                item["readme_excerpt"] = _excerpt(readme)  # <-- first paragraph
+        from .github import get_readme
+        r = get_readme(owner, name)
+        if r:
+            readme_text = _clean_markdown(r) if readme_mode == "full" else _excerpt(r)
+            key = "readme" if readme_mode == "full" else "readme_excerpt"
+            item[key] = readme_text
+
+    # ---- NEW: produce 3–5 line summary into item["summary"] ----
+    summarizer = get_summarizer(summarizer_kind, model=model_name) if summarizer_kind != "basic" else None
+    base_text = readme_text or description
+    if base_text:
+        if summarizer is None:
+            item["summary"] = basic_summary(name, base_text, description)
+        else:
+            item["summary"] = summarizer.summarize(name, base_text, description)
 
     return item
 
@@ -114,6 +105,7 @@ def main() -> None:
     Parses arguments, summarizes repositories, and prints or writes output.
     """
     p = argparse.ArgumentParser(prog="ghsum", description="Summarize a GitHub profile's repos.")
+
     p.add_argument("username", help="GitHub username (owner)")
     p.add_argument("--full", action="store_true", help="Include languages and README excerpt")
     p.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
@@ -126,12 +118,23 @@ def main() -> None:
         default="excerpt" if "--full" in os.sys.argv else "none",
         help="Include README: 'none' (skip), 'excerpt' (default), or 'full'."
     )
+    p.add_argument("--summarizer", choices=["basic", "ollama"], default="basic",
+               help="Summary engine. 'basic' (no LLM) or 'ollama' (local).")
+    p.add_argument("--model", default="llama3.2:3b",
+               help="Model name for ollama (default: llama3.2:3b). Ignored for basic.")
+    
     args = p.parse_args()
 
     repos = list_user_repos(args.username, include_forks=args.include_forks, include_archived=args.include_archived)
-    include_langs = args.full  # keep old behavior for languages
+    # include_langs = args.full  # keep old behavior for languages
     items = [
-        summarize_repo(args.username, r, include_langs=include_langs, readme_mode=args.readme)
+        summarize_repo(
+            args.username, r,
+            include_langs=args.full,
+            readme_mode=args.readme,
+            summarizer_kind=args.summarizer,
+            model_name=args.model,
+        )
         for r in repos
     ]
 
