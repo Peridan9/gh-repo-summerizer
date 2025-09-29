@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 import argparse, json, os, re
 from .github import list_user_repos, get_languages, get_readme
 
-def _excerpt(text: str, word_limit: int = 60) -> str:
+def _excerpt(text: str, word_limit: int = 500) -> str:
     """
     Extract a short summary from the first real paragraph of text.
 
@@ -34,6 +34,27 @@ def _excerpt(text: str, word_limit: int = 60) -> str:
     words = raw.split()
     return " ".join(words[:word_limit]).strip()
 
+def _clean_markdown(text: str) -> str:
+    """
+    Remove common markdown noise but keep the full text.
+
+    Args:
+        text (str): The input markdown text.
+
+    Returns:
+        str: The cleaned text without markdown.
+    """
+    lines = [ln for ln in text.splitlines() if not re.search(r"!\[.*\]\(.*\)", ln)]
+    raw = "\n".join(lines)
+    # [text](url) -> text
+    raw = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", raw)
+    # strip code fences and inline code
+    raw = re.sub(r"`{3}.*?`{3}", "", raw, flags=re.S)
+    raw = re.sub(r"`([^`]+)`", r"\1", raw)
+    # strip leading hashes in headings (keep the heading text)
+    raw = re.sub(r"^\s*#+\s*", "", raw, flags=re.M)
+    return raw.strip()
+
 def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     """
     Return the top k languages by byte count.
@@ -47,30 +68,26 @@ def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     """
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
-def summarize_repo(owner: str, repo: Dict[str, Any], with_details: bool) -> Dict[str, Any]:
-    """
-    Summarize a repository with basic info, and optionally languages and README excerpt.
-
-    Args:
-        owner (str): Repository owner (username).
-        repo (Dict[str, Any]): Repository metadata dictionary.
-        with_details (bool): If True, include languages and README excerpt.
-
-    Returns:
-        Dict[str, Any]: Summary dictionary for the repository.
-    """
+def summarize_repo(owner: str, repo: Dict[str, Any], include_langs: bool, readme_mode: str) -> Dict[str, Any]:
     name = repo["name"]
     item: Dict[str, Any] = {
         "name": name,
         "url": repo.get("html_url"),
         "description": repo.get("description") or "",
     }
-    if with_details:
+
+    if include_langs:
         langs = get_languages(owner, name)
         item["languages"] = _top_langs(langs)
+
+    if readme_mode != "none":
         readme = get_readme(owner, name)
         if readme:
-            item["readme_excerpt"] = _excerpt(readme)
+            if readme_mode == "full":
+                item["readme"] = _clean_markdown(readme)   # <-- full text
+            else:
+                item["readme_excerpt"] = _excerpt(readme)  # <-- first paragraph
+
     return item
 
 def to_markdown(items: List[Dict[str, Any]]) -> str:
@@ -103,10 +120,20 @@ def main() -> None:
     p.add_argument("--out", help="Write to file instead of stdout")
     p.add_argument("--include-forks", action="store_true", help="Include forked repos")
     p.add_argument("--include-archived", action="store_true", help="Include archived repos")
+    p.add_argument(
+        "--readme",
+        choices=["none", "excerpt", "full"],
+        default="excerpt" if "--full" in os.sys.argv else "none",
+        help="Include README: 'none' (skip), 'excerpt' (default), or 'full'."
+    )
     args = p.parse_args()
 
     repos = list_user_repos(args.username, include_forks=args.include_forks, include_archived=args.include_archived)
-    items = [summarize_repo(args.username, r, with_details=args.full) for r in repos]
+    include_langs = args.full  # keep old behavior for languages
+    items = [
+        summarize_repo(args.username, r, include_langs=include_langs, readme_mode=args.readme)
+        for r in repos
+    ]
 
     if args.format == "json":
         payload = json.dumps(items, ensure_ascii=False, indent=2)
