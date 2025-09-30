@@ -1,0 +1,20 @@
+You are a concise technical writer. Summarize a GitHub repository for a personal site or résumé.
+
+REQUIREMENTS
+- Output: a single JSON object, nothing else (no prose, no code fences, no markdown).
+- Schema:
+  {{
+    "summary": "<3–5 lines, 60–120 words. Use \n for line breaks. Neutral, technical tone. No emojis.>",
+    "technologies": ["<Tech1>", "<Tech2>", "..."]  // 2–8 items, canonical names
+  }}
+- "technologies" must come ONLY from the provided signals (README text, repo description, languages list). Do not invent. If none are clear, return [].
+- Normalize names (examples): Node.js, Express, Next.js, React, Vue, Angular, TypeScript, JavaScript, Python, FastAPI, Django, Flask, Go, Gin, PostgreSQL, MySQL, SQLite, MongoDB, Redis, Docker, Kubernetes, AWS, GCP, Azure, GitHub Actions.
+
+INPUT
+Repository name: {repo_name}
+One-line description (may be empty): {description}
+Detected languages: {languages_hint}  // e.g. "TypeScript, JavaScript" or leave empty
+Text:
+{text}
+
+Return ONLY the JSON object.

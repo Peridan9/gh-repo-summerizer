@@ -6,7 +6,7 @@ num_ctx = 8192           # larger context if you need big READMEs
 [prompt]
 # Optional external template to keep style editable without code changes.
 # Use placeholders: {repo_name}, {description}, {text}
-template_file = "prompts/portfolio_summary.txt"
+template_file = "prompts/protfolio_summary2.txt"
 version = "v1"           # bump when you change prompt style
 
 [cache]

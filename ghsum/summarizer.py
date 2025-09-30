@@ -13,7 +13,7 @@ def render_prompt(template: str | None, repo_name: str, base_text: str, descript
     """
     if template:
         # simple Python format placeholders
-        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "")
+        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "", languages_hint= "")
     # fallback to the built-in prompt
     return build_prompt(repo_name, base_text, description)
 
@@ -37,22 +37,24 @@ def _cap(s: str, max_chars: int = 12000) -> str:
 
 def build_prompt(repo_name: str, base_text: str, description: str = "") -> str:
     """Return a compact, deterministic prompt for 3–5 line summaries."""
+
     cleaned = _clean_markdown(base_text or "")
     cleaned = _cap(cleaned)
+
     return f"""
-You are a concise technical writer. Summarize this repository for a personal site / resume.
+    You are a concise technical writer. Summarize this repository for a personal site / resume.
 
-Constraints:
-- 3–5 lines (60–120 words total).
-- Explain WHAT it does, HOW at a high level, and key TECH.
-- Neutral technical tone. No hype/emojis/markdown.
+    Constraints:
+    - 3–5 lines (60–120 words total).
+    - Explain WHAT it does, HOW at a high level, and key TECH.
+    - Neutral technical tone. No hype/emojis/markdown.
 
-Repository name: {repo_name}
-Existing one-line description (may be empty): {description}
+    Repository name: {repo_name}
+    Existing one-line description (may be empty): {description}
 
-Text:
-{cleaned}
-""".strip()
+    Text:
+    {cleaned}
+    """.strip()
 
 # ---- basic (no-LLM) summarizer ---------------------------------------------
 
