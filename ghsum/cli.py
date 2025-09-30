@@ -1,4 +1,9 @@
-# simple CLI that prints repo summaries, with optional JSON/Markdown output
+"""Command-line interface for ghsum.
+
+Parses arguments, retrieves repositories via the GitHub API, and prints
+summaries in JSON or Markdown. It supports a "basic" built-in summarizer
+or an optional local LLM backend via Ollama.
+"""
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import argparse, json, os, re
@@ -8,17 +13,18 @@ from .config import load_settings
 
 
 def _excerpt(text: str, word_limit: int = 500) -> str:
-    """
-    Extract a short summary from the first real paragraph of text.
+    """Return a short excerpt from the first real paragraph of `text`.
 
-    Strips markdown, skips image/badge lines, and limits to a number of words.
+    This function lightly cleans markdown, skips image/badge lines, and
+    truncates to a target number of words. It is intentionally simple and
+    deterministic to keep the CLI fast and predictable.
 
     Args:
-        text (str): The input text (e.g., README content).
-        word_limit (int): Maximum number of words in the excerpt.
+        text: The input text (e.g., README content).
+        word_limit: Maximum number of words in the excerpt.
 
     Returns:
-        str: The summarized excerpt.
+        A summarized excerpt string.
     """
     # skip image/badge lines
     lines = [ln for ln in text.splitlines() if not re.search(r"!\[.*\]\(.*\)", ln)]
@@ -39,20 +45,37 @@ def _excerpt(text: str, word_limit: int = 500) -> str:
 
 
 def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
-    """
-    Return the top k languages by byte count.
+    """Return the top `k` languages by byte count.
 
     Args:
-        lang_bytes (Dict[str, int]): Mapping of language names to byte counts.
-        k (int): Number of top languages to return.
+        lang_bytes: Mapping of language names to byte counts.
+        k: Number of top languages to return.
 
     Returns:
-        List[str]: List of top language names.
+        A list of top language names.
     """
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
 def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str,
                    summarizer_obj=None, summarizer_kind: str = "basic", model_name: str | None = None) -> dict:
+    """Produce a per-repository summary item.
+
+    Fetches languages and README on demand and applies either the built-in
+    basic summarizer or the configured LLM summarizer.
+
+    Args:
+        owner: GitHub username.
+        repo: The repository JSON object from GitHub API.
+        include_langs: Whether to include the top languages list.
+        readme_mode: One of "none", "excerpt", or "full".
+        summarizer_obj: Optional LLM summarizer; if None, uses `basic_summary`.
+        summarizer_kind: Selected summarizer kind (for logging/telemetry).
+        model_name: Model name when using Ollama.
+
+    Returns:
+        A dictionary with keys like name, url, description, languages,
+        readme_excerpt/readme, and summary.
+    """
     name = repo["name"]
     description = repo.get("description") or ""
     item = {"name": name, "url": repo.get("html_url"), "description": description}
@@ -83,14 +106,13 @@ def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str
     return item
 
 def to_markdown(items: List[Dict[str, Any]]) -> str:
-    """
-    Convert a list of repository summaries to Markdown format.
+    """Convert a list of repository summaries to Markdown format.
 
     Args:
-        items (List[Dict[str, Any]]): List of repository summary dictionaries.
+        items: List of repository summary dictionaries.
 
     Returns:
-        str: Markdown-formatted string.
+        A Markdown-formatted string.
     """
     lines = []
     for it in items:
@@ -100,8 +122,7 @@ def to_markdown(items: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 def main() -> None:
-    """
-    Entry point for the CLI.
+    """Entry point for the CLI.
 
     Parses arguments, summarizes repositories, and prints or writes output.
     """

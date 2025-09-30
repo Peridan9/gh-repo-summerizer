@@ -10,6 +10,11 @@ import tomllib  # Python 3.11+
 
 @dataclass
 class Settings:
+    """Runtime configuration derived from `config.toml` and environment.
+
+    Values are merged with precedence: environment > config file > defaults.
+    """
+
     # summarizer
     summarizer_kind: str = "basic"
     model: str = "llama3.2:3b"
@@ -26,6 +31,7 @@ class Settings:
     include_archived: bool = False
 
 def read_file_text(path: Path | None) -> str | None:
+    """Read a text file if it exists and return its contents, else None."""
     if not path:
         return None
     if path.exists():
@@ -33,6 +39,7 @@ def read_file_text(path: Path | None) -> str | None:
     return None
 
 def load_config(path: str = "config.toml") -> dict:
+    """Load a TOML config file into a dictionary; return empty dict if missing."""
     p = Path(path)
     if not p.exists():
         return {}
@@ -40,6 +47,7 @@ def load_config(path: str = "config.toml") -> dict:
         return tomllib.load(f)
 
 def load_settings(config_path: str | None = None) -> Settings:
+    """Create a `Settings` object from config file and environment variables."""
     cfg = load_config(config_path or "config.toml")
 
     s = Settings()

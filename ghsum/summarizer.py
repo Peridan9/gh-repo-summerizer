@@ -5,6 +5,12 @@ import os
 import re
 
 def render_prompt(template: str | None, repo_name: str, base_text: str, description: str) -> str:
+    """Render the final prompt string for an LLM summarizer.
+
+    If an external template is provided, use it with simple `.format()`
+    placeholders. Otherwise, fall back to the built-in deterministic
+    `build_prompt()`.
+    """
     if template:
         # simple Python format placeholders
         return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "")
@@ -12,15 +18,7 @@ def render_prompt(template: str | None, repo_name: str, base_text: str, descript
     return build_prompt(repo_name, base_text, description)
 
 def _clean_markdown(text: str) -> str:
-    """
-    Remove common markdown noise but keep the full text.
-
-    Args:
-        text (str): The input markdown text.
-
-    Returns:
-        str: The cleaned text without markdown.
-    """
+    """Remove common markdown noise but keep the full text."""
     lines = [ln for ln in text.splitlines() if not re.search(r"!\[.*\]\(.*\)", ln)]
     raw = "\n".join(lines)
     # [text](url) -> text
@@ -38,9 +36,7 @@ def _cap(s: str, max_chars: int = 12000) -> str:
     return s if len(s) <= max_chars else s[:max_chars] + "\n[...truncated...]"
 
 def build_prompt(repo_name: str, base_text: str, description: str = "") -> str:
-    """
-    A compact, deterministic prompt for portfolio/resume summaries (3–5 lines).
-    """
+    """Return a compact, deterministic prompt for 3–5 line summaries."""
     cleaned = _clean_markdown(base_text or "")
     cleaned = _cap(cleaned)
     return f"""
@@ -61,9 +57,7 @@ Text:
 # ---- basic (no-LLM) summarizer ---------------------------------------------
 
 def basic_summary(repo_name: str, base_text: str, description: str = "") -> str:
-    """
-    LLM-free baseline: take first useful paragraph and cap to ~90 words.
-    """
+    """LLM-free baseline: first useful paragraph capped to ~90 words."""
     text = base_text.strip() or description.strip() or repo_name
     text = _clean_markdown(text)
     # pick first non-empty paragraph
@@ -80,6 +74,8 @@ def basic_summary(repo_name: str, base_text: str, description: str = "") -> str:
 # ---- Ollama (local) summarizer ---------------------------------------------
 
 class OllamaSummarizer:
+    """Simple wrapper around a local Ollama server's text-generation API."""
+
     def __init__(self, model: str = "llama3.2:3b",
                  base_url: str = "http://localhost:11434",
                  num_ctx: int = 8192,
@@ -90,6 +86,7 @@ class OllamaSummarizer:
         self.prompt_template = prompt_template
 
     def summarize(self, repo_name: str, base_text: str, description: str = "") -> str:
+        """Generate a summary using the configured local model via Ollama."""
         prompt = render_prompt(self.prompt_template, repo_name, base_text, description)
         payload = {
             "model": self.model,
@@ -106,6 +103,7 @@ class OllamaSummarizer:
 # ---- factory ----------------------------------------------------------------
 
 def get_summarizer(kind: str, **kwargs) -> Any:
+    """Factory that returns a summarizer object or `None` for basic mode."""
     kind = (kind or "basic").lower()
     if kind == "basic":
         return None  # means: use basic_summary()

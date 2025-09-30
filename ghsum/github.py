@@ -1,4 +1,8 @@
-# tiny, synchronous GitHub client
+"""Tiny synchronous GitHub client utilities used by the CLI.
+
+These functions intentionally avoid async and caching for simplicity.
+Provide a `GITHUB_TOKEN` in your environment to increase rate limits.
+"""
 from typing import Any, Dict, List, Optional
 import os, base64
 import httpx
@@ -8,11 +12,11 @@ load_dotenv()
 GH_API = "https://api.github.com"
 
 def _headers() -> Dict[str, str]:
-    """
-    Construct HTTP headers for GitHub API requests.
+    """Construct HTTP headers for GitHub API requests.
 
     Returns:
-        Dict[str, str]: Headers including Accept, API version, and Authorization if GITHUB_TOKEN is set.
+        Headers including Accept, API version, and Authorization if
+        `GITHUB_TOKEN` is set.
     """
     h = {
         "Accept": "application/vnd.github+json",
@@ -24,18 +28,17 @@ def _headers() -> Dict[str, str]:
     return h
 
 def list_user_repos(username: str, include_forks: bool = False, include_archived: bool = False) -> List[Dict[str, Any]]:
-    """
-    Return a list of repositories owned by the specified user.
+    """Return repositories owned by `username`.
 
     Handles pagination and can filter out forks and archived repositories.
 
     Args:
-        username (str): GitHub username.
-        include_forks (bool): If False, exclude forked repositories.
-        include_archived (bool): If False, exclude archived repositories.
+        username: GitHub username.
+        include_forks: If False, exclude forked repositories.
+        include_archived: If False, exclude archived repositories.
 
     Returns:
-        List[Dict[str, Any]]: List of repository metadata dictionaries.
+        List of repository metadata dictionaries.
     """
     results: List[Dict[str, Any]] = []
     page = 1
@@ -59,32 +62,14 @@ def list_user_repos(username: str, include_forks: bool = False, include_archived
     return results
 
 def get_languages(owner: str, repo: str) -> Dict[str, int]:
-    """
-    Get the language breakdown (in bytes) for a given repository.
-
-    Args:
-        owner (str): Repository owner.
-        repo (str): Repository name.
-
-    Returns:
-        Dict[str, int]: Mapping of language names to byte counts.
-    """
+    """Return the language breakdown (in bytes) for a repository."""
     with httpx.Client(timeout=20.0, headers=_headers()) as client:
         r = client.get(f"{GH_API}/repos/{owner}/{repo}/languages")
         r.raise_for_status()
         return r.json()
 
 def get_readme(owner: str, repo: str) -> Optional[str]:
-    """
-    Retrieve the README file content for a repository.
-
-    Args:
-        owner (str): Repository owner.
-        repo (str): Repository name.
-
-    Returns:
-        Optional[str]: README content as UTF-8 string, or None if not found.
-    """
+    """Retrieve the README content for a repository as a UTF-8 string."""
     with httpx.Client(timeout=20.0, headers=_headers()) as client:
         r = client.get(f"{GH_API}/repos/{owner}/{repo}/readme")
         if r.status_code == 404:
