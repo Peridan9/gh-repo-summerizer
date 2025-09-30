@@ -4,7 +4,7 @@ import httpx
 import os
 import re
 
-def render_prompt(template: str | None, repo_name: str, base_text: str, description: str) -> str:
+def render_prompt(template: str | None, repo_name: str, base_text: str, description: str, langs: str) -> str:
     """Render the final prompt string for an LLM summarizer.
 
     If an external template is provided, use it with simple `.format()`
@@ -13,7 +13,7 @@ def render_prompt(template: str | None, repo_name: str, base_text: str, descript
     """
     if template:
         # simple Python format placeholders
-        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "", languages_hint= "")
+        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "", languages_hint=langs or"")
     # fallback to the built-in prompt
     return build_prompt(repo_name, base_text, description)
 
@@ -87,9 +87,9 @@ class OllamaSummarizer:
         self.num_ctx = int(num_ctx)
         self.prompt_template = prompt_template
 
-    def summarize(self, repo_name: str, base_text: str, description: str = "") -> str:
+    def summarize(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
         """Generate a summary using the configured local model via Ollama."""
-        prompt = render_prompt(self.prompt_template, repo_name, base_text, description)
+        prompt = render_prompt(self.prompt_template, repo_name, base_text, description, langs)
         payload = {
             "model": self.model,
             "prompt": prompt,

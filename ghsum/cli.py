@@ -101,7 +101,7 @@ def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str
         if summarizer_obj is None:  # "basic" path
             item["summary"] = basic_summary(name, base_text, description)
         else:
-            item["summary"] = summarizer_obj.summarize(name, base_text, description)
+            item["summary"] = summarizer_obj.summarize(name, base_text, description, langs)
 
     return item
 
