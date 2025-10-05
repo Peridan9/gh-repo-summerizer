@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import argparse, json, os, re
 from .github import list_user_repos, get_languages, get_readme
-from .summarizer import get_summarizer, basic_summary, _clean_markdown
+from .summarizer import get_summarizer, basic_summary, _clean_markdown, RepositorySummary
 from .config import load_settings
 
 
@@ -57,25 +57,9 @@ def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
 def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str,
-                   summarizer_obj=None, summarizer_kind: str = "basic", model_name: str | None = None) -> dict:
-    """Produce a per-repository summary item.
-
-    Fetches languages and README on demand and applies either the built-in
-    basic summarizer or the configured LLM summarizer.
-
-    Args:
-        owner: GitHub username.
-        repo: The repository JSON object from GitHub API.
-        include_langs: Whether to include the top languages list.
-        readme_mode: One of "none", "excerpt", or "full".
-        summarizer_obj: Optional LLM summarizer; if None, uses `basic_summary`.
-        summarizer_kind: Selected summarizer kind (for logging/telemetry).
-        model_name: Model name when using Ollama.
-
-    Returns:
-        A dictionary with keys like name, url, description, languages,
-        readme_excerpt/readme, and summary.
-    """
+                   summarizer_obj=None, summarizer_kind: str = "basic", model_name: str | None = None, 
+                   use_structured: bool = False) -> dict:
+    """Produce a per-repository summary item."""
     name = repo["name"]
     description = repo.get("description") or ""
     item = {"name": name, "url": repo.get("html_url"), "description": description}
@@ -95,13 +79,21 @@ def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str
             key = "readme" if readme_mode == "full" else "readme_excerpt"
             item[key] = readme_text
 
-    # Build 3–5 line summary
+    # Build summary
     base_text = readme_text or description
     if base_text:
         if summarizer_obj is None:  # "basic" path
             item["summary"] = basic_summary(name, base_text, description)
         else:
-            item["summary"] = summarizer_obj.summarize(name, base_text, description, langs)
+            langs_str = ", ".join(item.get("languages", []))
+            if use_structured and hasattr(summarizer_obj, 'summarize_structured'):
+                # Use structured output
+                structured = summarizer_obj.summarize_structured(name, base_text, description, langs_str)
+                item["summary"] = structured.description
+                item["structured"] = structured.dict()
+            else:
+                # Use regular text output
+                item["summary"] = summarizer_obj.summarize(name, base_text, description, langs_str)
 
     return item
 
@@ -144,6 +136,8 @@ def main() -> None:
                help="Summary engine. 'basic' (no LLM) or 'ollama' (local).")
     p.add_argument("--model", default="llama3.2:3b",
                help="Model name for ollama (default: llama3.2:3b). Ignored for basic.")
+    p.add_argument("--structured", action="store_true", 
+               help="Use structured output with Pydantic validation (requires ollama).")
     p.add_argument("--config", help="Path to config.toml (defaults to ./config.toml if present)")
 
     args = p.parse_args()
@@ -180,6 +174,7 @@ def main() -> None:
             summarizer_obj=summarizer_obj,
             summarizer_kind=summarizer_kind,
             model_name=model_name,
+            use_structured=args.structured,
         )
         for r in repos
     ]

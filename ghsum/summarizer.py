@@ -1,8 +1,36 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Optional, Any, List
 import httpx
 import os
 import re
+import json
+from pydantic import BaseModel, Field, validator
+
+# Pydantic models for structured output
+class RepositorySummary(BaseModel):
+    """Structured summary of a repository."""
+    
+    name: str = Field(description="Repository name")
+    description: str = Field(description="What the repository does (1-2 sentences)")
+    purpose: str = Field(description="Primary purpose or use case")
+    technologies: List[str] = Field(description="Key technologies used (max 5)")
+    complexity: str = Field(default="medium", description="Complexity level: simple, medium, complex")
+    target_audience: str = Field(default="developers", description="Who would use this")
+    
+    @validator('technologies')
+    def validate_technologies(cls, v):
+        """Ensure technologies list is reasonable."""
+        if len(v) > 5:
+            raise ValueError("Too many technologies listed")
+        return [tech.lower().strip() for tech in v if tech.strip()]
+    
+    @validator('complexity')
+    def validate_complexity(cls, v):
+        """Ensure complexity is one of the allowed values."""
+        allowed = ['simple', 'medium', 'complex']
+        if v.lower() not in allowed:
+            raise ValueError(f"Complexity must be one of: {allowed}")
+        return v.lower()
 
 def render_prompt(template: str | None, repo_name: str, base_text: str, description: str, langs: str) -> str:
     """Render the final prompt string for an LLM summarizer.
@@ -56,6 +84,41 @@ def build_prompt(repo_name: str, base_text: str, description: str = "") -> str:
     {cleaned}
     """.strip()
 
+def build_structured_prompt(repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
+    """Build a prompt that requests structured JSON output."""
+    
+    schema_example = {
+        "name": "example-repo",
+        "description": "A tool for managing database migrations",
+        "purpose": "Simplify database schema changes across environments",
+        "technologies": ["python", "sqlalchemy", "postgresql"],
+        "complexity": "medium",
+        "target_audience": "backend developers"
+    }
+    
+    return f"""
+You are a technical writer. Analyze this repository and provide a structured summary.
+
+CRITICAL: Respond with ONLY valid JSON matching this exact schema:
+{json.dumps(schema_example, indent=2)}
+
+Repository name: {repo_name}
+Existing description: {description or "None"}
+Languages detected: {langs or "None"}
+
+Source text:
+{_cap(_clean_markdown(base_text or ""))}
+
+Instructions:
+- Be factual and only use information from the provided text
+- Keep description to 1-2 sentences
+- List only technologies explicitly mentioned
+- Choose complexity: simple (basic scripts), medium (applications), complex (systems)
+- Be conservative with technology claims
+
+Respond with valid JSON only:
+"""
+
 # ---- basic (no-LLM) summarizer ---------------------------------------------
 
 def basic_summary(repo_name: str, base_text: str, description: str = "") -> str:
@@ -94,13 +157,73 @@ class OllamaSummarizer:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "options": {"num_ctx": self.num_ctx},
+            "options": {
+                "num_ctx": self.num_ctx,
+                "temperature": 0.1,      # Lower temperature for consistency
+                "top_p": 0.9,            # Nucleus sampling for better quality
+                "repeat_penalty": 1.1,   # Reduce repetition
+            },
         }
         with httpx.Client(timeout=90.0) as client:
             r = client.post(f"{self.base_url}/api/generate", json=payload)
             r.raise_for_status()
             data = r.json()
             return (data.get("response") or "").strip()
+
+    def summarize_structured(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> RepositorySummary:
+        """Generate a structured summary using Pydantic validation."""
+        prompt = build_structured_prompt(repo_name, base_text, description, langs)
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "num_ctx": self.num_ctx,
+                "temperature": 0.1,      # Lower temperature for consistency
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+            },
+        }
+        
+        try:
+            with httpx.Client(timeout=90.0) as client:
+                r = client.post(f"{self.base_url}/api/generate", json=payload)
+                r.raise_for_status()
+                data = r.json()
+                response_text = data.get("response", "").strip()
+                
+                # Try to extract JSON from response
+                try:
+                    # Look for JSON in the response
+                    json_start = response_text.find('{')
+                    json_end = response_text.rfind('}') + 1
+                    if json_start != -1 and json_end > json_start:
+                        json_text = response_text[json_start:json_end]
+                        json_data = json.loads(json_text)
+                        return RepositorySummary(**json_data)
+                    else:
+                        raise ValueError("No JSON found in response")
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    # Fallback to basic summary if structured parsing fails
+                    print(f"Warning: Failed to parse structured response: {e}")
+                    return RepositorySummary(
+                        name=repo_name,
+                        description=description or "Repository summary",
+                        purpose="Software project",
+                        technologies=[],
+                        complexity="medium",
+                        target_audience="developers"
+                    )
+        except Exception as e:
+            print(f"Warning: Summarization failed: {e}")
+            return RepositorySummary(
+                name=repo_name,
+                description=description or "Repository summary",
+                purpose="Software project", 
+                technologies=[],
+                complexity="medium",
+                target_audience="developers"
+            )
 
 # ---- factory ----------------------------------------------------------------
 
