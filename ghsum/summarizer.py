@@ -5,6 +5,9 @@ import os
 import re
 import json
 from pydantic import BaseModel, Field, validator
+from langfuse import get_client
+
+_langfuse = get_client()
 
 # Pydantic models for structured output
 class RepositorySummary(BaseModel):
@@ -151,7 +154,6 @@ class OllamaSummarizer:
         self.prompt_template = prompt_template
 
     def summarize(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
-        """Generate a summary using the configured local model via Ollama."""
         prompt = render_prompt(self.prompt_template, repo_name, base_text, description, langs)
         payload = {
             "model": self.model,
@@ -159,16 +161,53 @@ class OllamaSummarizer:
             "stream": False,
             "options": {
                 "num_ctx": self.num_ctx,
-                "temperature": 0.1,      # Lower temperature for consistency
-                "top_p": 0.9,            # Nucleus sampling for better quality
-                "repeat_penalty": 1.1,   # Reduce repetition
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
             },
         }
-        with httpx.Client(timeout=90.0) as client:
-            r = client.post(f"{self.base_url}/api/generate", json=payload)
-            r.raise_for_status()
-            data = r.json()
-            return (data.get("response") or "").strip()
+
+        # --- Langfuse tracing ---
+        lf = _langfuse
+        # Root span for this repo summarization
+        with lf.start_as_current_span(
+            name="ghsum.summarize",
+            input={
+                "repo_name": repo_name,
+                "description": description,
+                "languages_hint": langs,
+            },
+            metadata={"provider": "ollama"},
+        ) as root:
+
+            # Attach useful trace attributes (optional)
+            root.update_trace(tags=["ghsum", "summarize"], metadata={"repo": repo_name})
+
+            # Child "generation" for the actual LLM call
+            with lf.start_as_current_generation(
+                name="ollama.generate",
+                model=self.model,
+                input=[{"role": "user", "content": prompt}],
+                model_parameters=payload.get("options", {}),
+            ) as gen:
+                try:
+                    with httpx.Client(timeout=90.0) as client:
+                        r = client.post(f"{self.base_url}/api/generate", json=payload)
+                        r.raise_for_status()
+                        data = r.json()
+                        response_text = (data.get("response") or "").strip()
+
+                        # record output (+ any usage data you compute)
+                        gen.update(output=response_text)
+                except Exception as e:
+                    # mark generation as failed
+                    gen.update(output={"error": str(e)})
+                    raise
+
+            # set root output with a short preview (keep UI clean)
+            root.update(output={"preview": response_text[:200]})
+
+        return response_text
 
     def summarize_structured(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> RepositorySummary:
         """Generate a structured summary using Pydantic validation."""
