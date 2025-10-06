@@ -174,6 +174,7 @@ class OllamaSummarizer:
             name="ghsum.summarize",
             input={
                 "repo_name": repo_name,
+                "readme": base_text,
                 "description": description,
                 "languages_hint": langs,
             },

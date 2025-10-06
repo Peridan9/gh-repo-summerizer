@@ -83,17 +83,17 @@ def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str
     base_text = readme_text or description
     if base_text:
         if summarizer_obj is None:  # "basic" path
-            item["summary"] = basic_summary(name, base_text, description)
+            item["summary"] = basic_summary(name, readme_text, description)
         else:
             langs_str = ", ".join(item.get("languages", []))
             if use_structured and hasattr(summarizer_obj, 'summarize_structured'):
                 # Use structured output
-                structured = summarizer_obj.summarize_structured(name, base_text, description, langs_str)
+                structured = summarizer_obj.summarize_structured(name, readme_text, description, langs_str)
                 item["summary"] = structured.description
                 item["structured"] = structured.dict()
             else:
                 # Use regular text output
-                item["summary"] = summarizer_obj.summarize(name, base_text, description, langs_str)
+                item["summary"] = summarizer_obj.summarize(name, readme_text, description, langs_str)
 
     return item
 
