@@ -1,7 +1,5 @@
 from __future__ import annotations
 from typing import Optional, Any, List
-import httpx
-import os
 import re
 import json
 from pathlib import Path
@@ -9,11 +7,8 @@ from pydantic import BaseModel, Field, validator
 from langfuse import Langfuse, get_client
 from langfuse.langchain import CallbackHandler
 from langchain_ollama.llms import OllamaLLM
-from langchain_ollama.chat_models import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-import pdb
 
 
 def _clean_markdown(text: str) -> str:
@@ -69,6 +64,11 @@ def render_prompt2_from_json(json_path: str | Path) -> ChatPromptTemplate:
     prompt.input_variables = input_vars  # ensure vars are recognized
     return prompt
 
+def load_prompt_template(path: str | Path) -> PromptTemplate:
+    """Load a single-block PromptTemplate from a .txt file."""
+    tmpl = Path(path).read_text(encoding="utf-8")
+    # NOTE: your file uses placeholders: {repo_name}, {description}, {languages_hint}, {text}
+    return PromptTemplate.from_template(tmpl)
 
 # ---- basic (no-LLM) summarizer ---------------------------------------------
 
@@ -103,10 +103,11 @@ class OllamaSummarizer:
             format="json"
         )
         self.prompt_template = prompt_template
+        self.prompt_path = str(Path(__file__).resolve().parents[1] / "prompts" / "protfolio_summary2.txt")
 
     def summarize(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
 
-        prompt = render_prompt2_from_json("prompts/repo_summary_prompt.json")
+        prompt = load_prompt_template(self.prompt_path)
 
         inputs = {
             "repo_name": repo_name,
@@ -123,7 +124,10 @@ class OllamaSummarizer:
         
         langfuse.flush()
         
-        return response
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return response
 
 
 

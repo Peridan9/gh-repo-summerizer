@@ -15,6 +15,6 @@ Repository name: {repo_name}
 One-line description (may be empty): {description}
 Detected languages: {languages_hint}  // e.g. "TypeScript, JavaScript" or leave empty
 Text:
-{cleaned}
+{cleaned_text}
 
 Return ONLY the JSON object.
