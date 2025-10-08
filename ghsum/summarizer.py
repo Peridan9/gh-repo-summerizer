@@ -4,49 +4,16 @@ import httpx
 import os
 import re
 import json
+from pathlib import Path
 from pydantic import BaseModel, Field, validator
-from langfuse import get_client
+from langfuse import Langfuse, get_client
+from langfuse.langchain import CallbackHandler
+from langchain_ollama.llms import OllamaLLM
+from langchain_ollama.chat_models import ChatOllama
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
-_langfuse = get_client()
-
-# Pydantic models for structured output
-class RepositorySummary(BaseModel):
-    """Structured summary of a repository."""
-    
-    name: str = Field(description="Repository name")
-    description: str = Field(description="What the repository does (1-2 sentences)")
-    purpose: str = Field(description="Primary purpose or use case")
-    technologies: List[str] = Field(description="Key technologies used (max 5)")
-    complexity: str = Field(default="medium", description="Complexity level: simple, medium, complex")
-    target_audience: str = Field(default="developers", description="Who would use this")
-    
-    @validator('technologies')
-    def validate_technologies(cls, v):
-        """Ensure technologies list is reasonable."""
-        if len(v) > 5:
-            raise ValueError("Too many technologies listed")
-        return [tech.lower().strip() for tech in v if tech.strip()]
-    
-    @validator('complexity')
-    def validate_complexity(cls, v):
-        """Ensure complexity is one of the allowed values."""
-        allowed = ['simple', 'medium', 'complex']
-        if v.lower() not in allowed:
-            raise ValueError(f"Complexity must be one of: {allowed}")
-        return v.lower()
-
-def render_prompt(template: str | None, repo_name: str, base_text: str, description: str, langs: str) -> str:
-    """Render the final prompt string for an LLM summarizer.
-
-    If an external template is provided, use it with simple `.format()`
-    placeholders. Otherwise, fall back to the built-in deterministic
-    `build_prompt()`.
-    """
-    if template:
-        # simple Python format placeholders
-        return template.format(repo_name=repo_name, text=_cap(_clean_markdown(base_text or "")), description=description or "", languages_hint=langs or"")
-    # fallback to the built-in prompt
-    return build_prompt(repo_name, base_text, description)
 
 def _clean_markdown(text: str) -> str:
     """Remove common markdown noise but keep the full text."""
@@ -87,40 +54,19 @@ def build_prompt(repo_name: str, base_text: str, description: str = "") -> str:
     {cleaned}
     """.strip()
 
-def build_structured_prompt(repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
-    """Build a prompt that requests structured JSON output."""
-    
-    schema_example = {
-        "name": "example-repo",
-        "description": "A tool for managing database migrations",
-        "purpose": "Simplify database schema changes across environments",
-        "technologies": ["python", "sqlalchemy", "postgresql"],
-        "complexity": "medium",
-        "target_audience": "backend developers"
-    }
-    
-    return f"""
-You are a technical writer. Analyze this repository and provide a structured summary.
+def render_prompt2_from_json(json_path: str | Path) -> ChatPromptTemplate:
+    """Load a ChatPromptTemplate from a JSON file (system+user messages)."""
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-CRITICAL: Respond with ONLY valid JSON matching this exact schema:
-{json.dumps(schema_example, indent=2)}
+    messages = data["messages"]
+    input_vars = data.get("input_variables", [])
 
-Repository name: {repo_name}
-Existing description: {description or "None"}
-Languages detected: {langs or "None"}
+    # Build a ChatPromptTemplate directly from the messages
+    prompt = ChatPromptTemplate.from_messages(messages)
+    prompt.input_variables = input_vars  # ensure vars are recognized
+    return prompt
 
-Source text:
-{_cap(_clean_markdown(base_text or ""))}
-
-Instructions:
-- Be factual and only use information from the provided text
-- Keep description to 1-2 sentences
-- List only technologies explicitly mentioned
-- Choose complexity: simple (basic scripts), medium (applications), complex (systems)
-- Be conservative with technology claims
-
-Respond with valid JSON only:
-"""
 
 # ---- basic (no-LLM) summarizer ---------------------------------------------
 
@@ -148,122 +94,36 @@ class OllamaSummarizer:
                  base_url: str = "http://localhost:11434",
                  num_ctx: int = 8192,
                  prompt_template: str | None = None):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
-        self.num_ctx = int(num_ctx)
+
+        self.model = ChatOllama(
+            model=model,
+            temperature=0.1,
+            format="json"
+        )
         self.prompt_template = prompt_template
 
     def summarize(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
-        prompt = render_prompt(self.prompt_template, repo_name, base_text, description, langs)
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "num_ctx": self.num_ctx,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "repeat_penalty": 1.1,
-            },
+
+        prompt = render_prompt2_from_json("prompts/repo_summary_prompt.json")
+
+        inputs = {
+            "repo_name": repo_name,
+            "cleaned_text": _cap(_clean_markdown(base_text or "")),
+            "description": description or "",
+            "languages_hint": langs or ""
         }
 
-        # --- Langfuse tracing ---
-        lf = _langfuse
-        # Root span for this repo summarization
-        with lf.start_as_current_span(
-            name="ghsum.summarize",
-            input={
-                "repo_name": repo_name,
-                "readme": base_text,
-                "description": description,
-                "languages_hint": langs,
-            },
-            metadata={"provider": "ollama"},
-        ) as root:
-
-            # Attach useful trace attributes (optional)
-            root.update_trace(tags=["ghsum", "summarize"], metadata={"repo": repo_name})
-
-            # Child "generation" for the actual LLM call
-            with lf.start_as_current_generation(
-                name="ollama.generate",
-                model=self.model,
-                input=[{"role": "user", "content": prompt}],
-                model_parameters=payload.get("options", {}),
-            ) as gen:
-                try:
-                    with httpx.Client(timeout=90.0) as client:
-                        r = client.post(f"{self.base_url}/api/generate", json=payload)
-                        r.raise_for_status()
-                        data = r.json()
-                        response_text = (data.get("response") or "").strip()
-
-                        # record output (+ any usage data you compute)
-                        gen.update(output=response_text)
-                except Exception as e:
-                    # mark generation as failed
-                    gen.update(output={"error": str(e)})
-                    raise
-
-            # set root output with a short preview (keep UI clean)
-            root.update(output={"preview": response_text[:200]})
-
-        return response_text
-
-    def summarize_structured(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> RepositorySummary:
-        """Generate a structured summary using Pydantic validation."""
-        prompt = build_structured_prompt(repo_name, base_text, description, langs)
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "num_ctx": self.num_ctx,
-                "temperature": 0.1,      # Lower temperature for consistency
-                "top_p": 0.9,
-                "repeat_penalty": 1.1,
-            },
-        }
+        langfuse = get_client()
+        langfuse_handler = CallbackHandler()
         
-        try:
-            with httpx.Client(timeout=90.0) as client:
-                r = client.post(f"{self.base_url}/api/generate", json=payload)
-                r.raise_for_status()
-                data = r.json()
-                response_text = data.get("response", "").strip()
-                
-                # Try to extract JSON from response
-                try:
-                    # Look for JSON in the response
-                    json_start = response_text.find('{')
-                    json_end = response_text.rfind('}') + 1
-                    if json_start != -1 and json_end > json_start:
-                        json_text = response_text[json_start:json_end]
-                        json_data = json.loads(json_text)
-                        return RepositorySummary(**json_data)
-                    else:
-                        raise ValueError("No JSON found in response")
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    # Fallback to basic summary if structured parsing fails
-                    print(f"Warning: Failed to parse structured response: {e}")
-                    return RepositorySummary(
-                        name=repo_name,
-                        description=description or "Repository summary",
-                        purpose="Software project",
-                        technologies=[],
-                        complexity="medium",
-                        target_audience="developers"
-                    )
-        except Exception as e:
-            print(f"Warning: Summarization failed: {e}")
-            return RepositorySummary(
-                name=repo_name,
-                description=description or "Repository summary",
-                purpose="Software project", 
-                technologies=[],
-                complexity="medium",
-                target_audience="developers"
-            )
+        chain = prompt | self.model | StrOutputParser()
+        response = chain.invoke(inputs, config={"callbacks": [langfuse_handler]})
+        
+        langfuse.flush()
+        
+        return response
+
+
 
 # ---- factory ----------------------------------------------------------------
 

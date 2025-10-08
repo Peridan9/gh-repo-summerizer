@@ -2,33 +2,20 @@
 
 Parses arguments, retrieves repositories via the GitHub API, and prints
 summaries in JSON or Markdown. It supports a "basic" built-in summarizer
-or an optional local LLM backend via Ollama.
+or a local LLM backend via Ollama.
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import argparse, json, os, re
+
 from .github import list_user_repos, get_languages, get_readme
-from .summarizer import get_summarizer, basic_summary, _clean_markdown, RepositorySummary
+from .summarizer import get_summarizer, basic_summary, _clean_markdown
 from .config import load_settings
 
 
 def _excerpt(text: str, word_limit: int = 500) -> str:
-    """Return a short excerpt from the first real paragraph of `text`.
-
-    This function lightly cleans markdown, skips image/badge lines, and
-    truncates to a target number of words. It is intentionally simple and
-    deterministic to keep the CLI fast and predictable.
-
-    Args:
-        text: The input text (e.g., README content).
-        word_limit: Maximum number of words in the excerpt.
-
-    Returns:
-        A summarized excerpt string.
-    """
-    # skip image/badge lines
+    """Return a short excerpt from the first real paragraph of `text`."""
     lines = [ln for ln in text.splitlines() if not re.search(r"!\[.*\]\(.*\)", ln)]
-    # find first non-empty paragraph
     para = []
     for ln in lines:
         if ln.strip():
@@ -36,7 +23,6 @@ def _excerpt(text: str, word_limit: int = 500) -> str:
         elif para:
             break
     raw = " ".join(para) if para else text
-    # strip markdown links/code fences (very light)
     raw = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", raw)
     raw = re.sub(r"`{1,3}.*?`{1,3}", "", raw)
     raw = re.sub(r"#+\s*", "", raw)  # headings
@@ -45,79 +31,69 @@ def _excerpt(text: str, word_limit: int = 500) -> str:
 
 
 def _top_langs(lang_bytes: Dict[str, int], k: int = 3) -> List[str]:
-    """Return the top `k` languages by byte count.
-
-    Args:
-        lang_bytes: Mapping of language names to byte counts.
-        k: Number of top languages to return.
-
-    Returns:
-        A list of top language names.
-    """
+    """Return the top `k` languages by byte count."""
     return [name for name, _ in sorted(lang_bytes.items(), key=lambda kv: kv[1], reverse=True)[:k]]
 
-def summarize_repo(owner: str, repo: dict, include_langs: bool, readme_mode: str,
-                   summarizer_obj=None, summarizer_kind: str = "basic", model_name: str | None = None, 
-                   use_structured: bool = False) -> dict:
+
+def summarize_repo(
+    owner: str,
+    repo: dict,
+    include_langs: bool,
+    readme_mode: str,
+    summarizer_obj=None,
+    summarizer_kind: str = "basic",
+    model_name: str | None = None,
+) -> dict:
     """Produce a per-repository summary item."""
     name = repo["name"]
     description = repo.get("description") or ""
-    item = {"name": name, "url": repo.get("html_url"), "description": description}
+    item: Dict[str, Any] = {"name": name, "url": repo.get("html_url"), "description": description}
 
+    # Languages (optional)
+    langs_list: List[str] = []
     if include_langs:
-        from .github import get_languages
-        langs = get_languages(owner, name)
-        item["languages"] = _top_langs(langs)
+        lang_bytes = get_languages(owner, name)
+        langs_list = _top_langs(lang_bytes)
+        item["languages"] = langs_list
 
-    # readme_mode: "none" | "excerpt" | "full"
+    # README (none | excerpt | full)
     readme_text = None
     if readme_mode != "none":
-        from .github import get_readme
         r = get_readme(owner, name)
         if r:
             readme_text = _clean_markdown(r) if readme_mode == "full" else _excerpt(r)
             key = "readme" if readme_mode == "full" else "readme_excerpt"
             item[key] = readme_text
 
-    # Build summary
+    # Build summary text source
     base_text = readme_text or description
+
     if base_text:
         if summarizer_obj is None:  # "basic" path
-            item["summary"] = basic_summary(name, readme_text, description)
+            item["summary"] = basic_summary(name, base_text, description)
         else:
-            langs_str = ", ".join(item.get("languages", []))
-            if use_structured and hasattr(summarizer_obj, 'summarize_structured'):
-                # Use structured output
-                structured = summarizer_obj.summarize_structured(name, readme_text, description, langs_str)
-                item["summary"] = structured.description
-                item["structured"] = structured.dict()
-            else:
-                # Use regular text output
-                item["summary"] = summarizer_obj.summarize(name, readme_text, description, langs_str)
+            langs_str = ", ".join(langs_list) if langs_list else ""
+            item["summary"] = summarizer_obj.summarize(name, base_text, description, langs_str)
 
     return item
 
+
 def to_markdown(items: List[Dict[str, Any]]) -> str:
-    """Convert a list of repository summaries to Markdown format.
-
-    Args:
-        items: List of repository summary dictionaries.
-
-    Returns:
-        A Markdown-formatted string.
-    """
+    """Convert a list of repository summaries to Markdown format."""
     lines = []
     for it in items:
         tech = f" — _{', '.join(it.get('languages', []))}_" if it.get("languages") else ""
-        desc = f": {it['readme_excerpt']}" if it.get("readme_excerpt") else (f": {it['description']}" if it.get("description") else "")
+        desc = (
+            f": {it['readme_excerpt']}"
+            if it.get("readme_excerpt")
+            else (f": {it['description']}" if it.get("description") else "")
+        )
         lines.append(f"- [{it['name']}]({it['url']}){tech}{desc}")
     return "\n".join(lines)
 
-def main() -> None:
-    """Entry point for the CLI.
 
-    Parses arguments, summarizes repositories, and prints or writes output.
-    """
+def main() -> None:
+    """Entry point for the CLI."""
     p = argparse.ArgumentParser(prog="ghsum", description="Summarize a GitHub profile's repos.")
 
     p.add_argument("username", help="GitHub username (owner)")
@@ -132,12 +108,17 @@ def main() -> None:
         default="excerpt" if "--full" in os.sys.argv else "none",
         help="Include README: 'none' (skip), 'excerpt' (default), or 'full'."
     )
-    p.add_argument("--summarizer", choices=["basic", "ollama"], default="basic",
-               help="Summary engine. 'basic' (no LLM) or 'ollama' (local).")
-    p.add_argument("--model", default="llama3.2:3b",
-               help="Model name for ollama (default: llama3.2:3b). Ignored for basic.")
-    p.add_argument("--structured", action="store_true", 
-               help="Use structured output with Pydantic validation (requires ollama).")
+    p.add_argument(
+        "--summarizer",
+        choices=["basic", "ollama"],
+        default="basic",
+        help="Summary engine. 'basic' (no LLM) or 'ollama' (local)."
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="Model name for ollama (e.g., qwen2.5:7b-instruct). If omitted, uses config.toml."
+    )
     p.add_argument("--config", help="Path to config.toml (defaults to ./config.toml if present)")
 
     args = p.parse_args()
@@ -150,8 +131,9 @@ def main() -> None:
     model_name = args.model or s.model
     num_ctx = s.num_ctx
     base_url = s.ollama_base_url
-    prompt_template = s.prompt_template
+    prompt_template = s.prompt_template  # currently unused by your new summarizer (JSON file default)
 
+    # Build summarizer instance (once)
     summarizer_obj = None
     if summarizer_kind != "basic":
         summarizer_obj = get_summarizer(
@@ -162,23 +144,28 @@ def main() -> None:
             prompt_template=prompt_template,
         )
 
-    # Readme mode and flags remain from your CLI (args.readme, args.full, etc.)
+    # Fetch repos
+    repos = list_user_repos(
+        args.username,
+        include_forks=args.include_forks,
+        include_archived=args.include_archived
+    )
 
-    repos = list_user_repos(args.username, include_forks=args.include_forks, include_archived=args.include_archived)
-
+    # Summarize
     items = [
         summarize_repo(
-            args.username, r,
+            args.username,
+            r,
             include_langs=args.full,
             readme_mode=args.readme,
             summarizer_obj=summarizer_obj,
             summarizer_kind=summarizer_kind,
             model_name=model_name,
-            use_structured=args.structured,
         )
         for r in repos
     ]
 
+    # Output
     if args.format == "json":
         payload = json.dumps(items, ensure_ascii=False, indent=2)
     else:
@@ -191,6 +178,7 @@ def main() -> None:
         print(f"wrote {args.out} ({len(items)} repos)")
     else:
         print(payload)
+
 
 if __name__ == "__main__":
     main()
