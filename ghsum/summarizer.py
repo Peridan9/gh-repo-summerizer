@@ -13,6 +13,7 @@ from langchain_ollama.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+import pdb
 
 
 def _clean_markdown(text: str) -> str:
@@ -63,6 +64,7 @@ def render_prompt2_from_json(json_path: str | Path) -> ChatPromptTemplate:
     input_vars = data.get("input_variables", [])
 
     # Build a ChatPromptTemplate directly from the messages
+
     prompt = ChatPromptTemplate.from_messages(messages)
     prompt.input_variables = input_vars  # ensure vars are recognized
     return prompt
@@ -95,7 +97,7 @@ class OllamaSummarizer:
                  num_ctx: int = 8192,
                  prompt_template: str | None = None):
 
-        self.model = ChatOllama(
+        self.model = OllamaLLM(
             model=model,
             temperature=0.1,
             format="json"
@@ -108,7 +110,7 @@ class OllamaSummarizer:
 
         inputs = {
             "repo_name": repo_name,
-            "cleaned_text": _cap(_clean_markdown(base_text or "")),
+            "cleaned_text": _cap(base_text or ""),
             "description": description or "",
             "languages_hint": langs or ""
         }
