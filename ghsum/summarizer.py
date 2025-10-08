@@ -99,7 +99,7 @@ class OllamaSummarizer:
 
         self.model = OllamaLLM(
             model=model,
-            temperature=0.1,
+            temperature=0,
             format="json"
         )
         self.prompt_template = prompt_template
