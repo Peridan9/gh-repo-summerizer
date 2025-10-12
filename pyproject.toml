@@ -16,9 +16,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.2",
-]
+dev = []
 
 [project.scripts]
-ghsum = "ghsum.cli:main"
+ghsum = "ghsum.cli.main:main"

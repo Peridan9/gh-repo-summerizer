@@ -1,9 +1,32 @@
-"""ghsum: GitHub repository summarizer CLI package.
+"""GitHub repository summarizer.
 
-This package provides a small command-line tool that fetches repositories
-via the GitHub API and produces concise summaries in JSON or Markdown.
+A tool for summarizing GitHub repositories using various backends.
+Can be used as a CLI tool or imported as an SDK.
 """
 
-__all__ = ["cli", "config", "github", "summarizer"]
+__version__ = "0.1.0"
+
+# Re-export main functionality for easy importing
+from .core import (
+    list_user_repos,
+    get_languages,
+    get_readme,
+    get_summarizer,
+    basic_summary,
+    OllamaSummarizer,
+    load_settings,
+    Settings,
+)
+
+__all__ = [
+    "list_user_repos",
+    "get_languages",
+    "get_readme", 
+    "get_summarizer",
+    "basic_summary",
+    "OllamaSummarizer",
+    "load_settings",
+    "Settings",
+]
 
 

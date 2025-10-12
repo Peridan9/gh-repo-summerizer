@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, validator
 from langfuse import Langfuse, get_client
 from langfuse.langchain import CallbackHandler
 from langchain_ollama.llms import OllamaLLM
-from langchain.prompts import PromptTemplate
+from langchain.prompts import PromptTemplate, ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 
@@ -103,7 +103,7 @@ class OllamaSummarizer:
             format="json"
         )
         self.prompt_template = prompt_template
-        self.prompt_path = str(Path(__file__).resolve().parents[1] / "prompts" / "protfolio_summary2.txt")
+        self.prompt_path = str(Path(__file__).resolve().parents[2] / "prompts" / "protfolio_summary2.txt")
 
     def summarize(self, repo_name: str, base_text: str, description: str = "", langs: str = "") -> str:
 

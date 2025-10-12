@@ -7,9 +7,9 @@ or an optional local LLM backend via Ollama.
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import argparse, json, os, re
-from .github import list_user_repos, get_languages, get_readme
-from .summarizer import get_summarizer, basic_summary, _clean_markdown
-from .config import load_settings
+from ..core.github import list_user_repos, get_languages, get_readme
+from ..core.summarizer import get_summarizer, basic_summary, _clean_markdown
+from ..core.config import load_settings
 
 
 def _excerpt(text: str, word_limit: int = 500) -> str:
@@ -72,14 +72,14 @@ def summarize_repo(
     item = {"name": name, "url": repo.get("html_url"), "description": description}
 
     if include_langs:
-        from .github import get_languages
+        from ..core.github import get_languages
         langs = get_languages(owner, name)
         item["languages"] = _top_langs(langs)
 
     # readme_mode: "none" | "excerpt" | "full"
     readme_text = None
     if readme_mode != "none":
-        from .github import get_readme
+        from ..core.github import get_readme
         r = get_readme(owner, name)
         if r:
             readme_text = _clean_markdown(r) if readme_mode == "full" else _excerpt(r)
