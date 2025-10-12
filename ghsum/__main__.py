@@ -1,8 +1,20 @@
-# ghsum/__main__.py
 """Module entrypoint for `python -m ghsum`.
 
-Prefer using the installed console script `ghsum`. This module simply forwards
-to the same `main()` function.
+This module enables running ghsum as a Python module using `python -m ghsum`.
+It forwards to the same main() function as the console script.
+
+Usage:
+    ```bash
+    # Run as module (equivalent to 'ghsum' command)
+    python -m ghsum username --format json
+    
+    # With full options
+    python -m ghsum username --full --format md --summarizer ollama
+    ```
+
+Note:
+    Prefer using the installed console script `ghsum` when available,
+    as it's more convenient and doesn't require Python module syntax.
 """
 
 try:

@@ -1,8 +1,33 @@
 """Command-line interface for ghsum.
 
-Parses arguments, retrieves repositories via the GitHub API, and prints
-summaries in JSON or Markdown. It supports a "basic" built-in summarizer
-or an optional local LLM backend via Ollama.
+This module provides the main CLI functionality for GitHub repository summarization.
+It parses command-line arguments, retrieves repositories via the GitHub API, and
+outputs summaries in JSON or Markdown format.
+
+Features:
+    - Multiple summarization backends (basic, Ollama)
+    - Flexible output formats (JSON, Markdown)
+    - Repository filtering (forks, archived)
+    - README content inclusion options
+    - Configuration file support
+
+Usage:
+    ```bash
+    # Basic usage
+    ghsum username
+    
+    # With full details and Markdown output
+    ghsum username --full --format md
+    
+    # Using Ollama summarizer
+    ghsum username --summarizer ollama --model llama3.2:3b
+    ```
+
+Configuration:
+    The CLI supports configuration via:
+    - Command-line arguments (highest priority)
+    - Environment variables
+    - config.toml file (lowest priority)
 """
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
@@ -65,8 +90,28 @@ def summarize_repo(
         summarizer_kind: str = "basic", 
         model_name: str | None = None, 
         use_structured: bool = False) -> dict:
+    """Produce a per-repository summary item.
     
-    """Produce a per-repository summary item."""
+    Args:
+        owner: Repository owner (username or organization).
+        repo: Repository metadata dictionary from GitHub API.
+        include_langs: Whether to include programming languages.
+        readme_mode: README inclusion mode ("none", "excerpt", "full").
+        summarizer_obj: Summarizer instance (None for basic mode).
+        summarizer_kind: Type of summarizer being used.
+        model_name: Model name for logging purposes.
+        use_structured: Whether to use structured output (requires LLM).
+        
+    Returns:
+        Dictionary containing repository summary with keys:
+        - name: Repository name
+        - url: Repository URL
+        - description: Repository description
+        - languages: List of top languages (if include_langs=True)
+        - readme/readme_excerpt: README content (if readme_mode != "none")
+        - summary: Generated summary text
+        - structured: Structured output data (if use_structured=True)
+    """
     name = repo["name"]
     description = repo.get("description") or ""
     item = {"name": name, "url": repo.get("html_url"), "description": description}
@@ -123,7 +168,19 @@ def to_markdown(items: List[Dict[str, Any]]) -> str:
 def main() -> None:
     """Entry point for the CLI.
 
-    Parses arguments, summarizes repositories, and prints or writes output.
+    Parses command-line arguments, loads configuration, retrieves repositories
+    from GitHub, generates summaries, and outputs results in the requested format.
+    
+    The function handles:
+    - Argument parsing and validation
+    - Configuration loading (CLI > env > config file)
+    - Repository data retrieval from GitHub API
+    - Summary generation using selected backend
+    - Output formatting (JSON or Markdown)
+    - File writing or stdout output
+    
+    Raises:
+        SystemExit: On argument parsing errors or API failures.
     """
     p = argparse.ArgumentParser(prog="ghsum", description="Summarize a GitHub profile's repos.")
 

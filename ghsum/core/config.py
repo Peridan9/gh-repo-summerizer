@@ -1,37 +1,81 @@
-# src/ghsum/config.py
+"""Configuration management for ghsum.
+
+This module handles loading and merging configuration from multiple sources:
+1. Environment variables (highest priority)
+2. TOML configuration file (medium priority)  
+3. Default values (lowest priority)
+
+Configuration Sources:
+    - config.toml: TOML file with structured configuration
+    - Environment variables: Override config file values
+    - Default values: Fallback when no config is provided
+
+Example config.toml:
+    ```toml
+    [summarizer]
+    kind = "ollama"
+    model = "llama3.2:3b"
+    num_ctx = 8192
+
+    [github]
+    include_forks = false
+    include_archived = false
+    ```
+
+Environment Variables:
+    SUMMARIZER: Override summarizer kind
+    SUMMARY_MODEL: Override model name
+    SUMMARY_NUM_CTX: Override context length
+    OLLAMA_BASE_URL: Override Ollama server URL
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import os
 import tomllib  # Python 3.11+
 
-# If you're using python-dotenv already, it will be loaded elsewhere (github.py).
-# This module just reads config.toml and merges env & CLI defaults.
-
 @dataclass
 class Settings:
     """Runtime configuration derived from `config.toml` and environment.
 
     Values are merged with precedence: environment > config file > defaults.
+    
+    Attributes:
+        summarizer_kind: Type of summarizer to use ("basic" or "ollama").
+        model: Model name for Ollama summarizer.
+        num_ctx: Context length for LLM processing.
+        ollama_base_url: Base URL for Ollama server.
+        prompt_template: Custom prompt template content.
+        prompt_version: Version identifier for prompt templates.
+        cache_dir: Directory for caching data.
+        include_forks: Whether to include forked repositories.
+        include_archived: Whether to include archived repositories.
     """
 
-    # summarizer
+    # Summarizer configuration
     summarizer_kind: str = "basic"
     model: str = "llama3.2:3b"
     num_ctx: int = 8192
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-    # prompt
+    # Prompt configuration
     prompt_template: str | None = None
     prompt_version: str = "v1"
 
-    # misc
+    # General configuration
     cache_dir: str = ".cache"
     include_forks: bool = False
     include_archived: bool = False
 
 def read_file_text(path: Path | None) -> str | None:
-    """Read a text file if it exists and return its contents, else None."""
+    """Read a text file if it exists and return its contents, else None.
+    
+    Args:
+        path: Path to the file to read.
+        
+    Returns:
+        File contents as string, or None if file doesn't exist.
+    """
     if not path:
         return None
     if path.exists():
@@ -39,7 +83,17 @@ def read_file_text(path: Path | None) -> str | None:
     return None
 
 def load_config(path: str = "config.toml") -> dict:
-    """Load a TOML config file into a dictionary; return empty dict if missing."""
+    """Load a TOML config file into a dictionary.
+    
+    Args:
+        path: Path to the TOML configuration file.
+        
+    Returns:
+        Dictionary containing configuration data, or empty dict if file missing.
+        
+    Note:
+        Uses tomllib (Python 3.11+) for TOML parsing.
+    """
     p = Path(path)
     if not p.exists():
         return {}
@@ -47,7 +101,25 @@ def load_config(path: str = "config.toml") -> dict:
         return tomllib.load(f)
 
 def load_settings(config_path: str | None = None) -> Settings:
-    """Create a `Settings` object from config file and environment variables."""
+    """Create a `Settings` object from config file and environment variables.
+    
+    Args:
+        config_path: Path to TOML config file. Defaults to "config.toml".
+        
+    Returns:
+        Settings object with merged configuration from all sources.
+        
+    Example:
+        ```python
+        from ghsum.core.config import load_settings
+        
+        # Load with default config file
+        settings = load_settings()
+        
+        # Load with custom config file
+        settings = load_settings("custom.toml")
+        ```
+    """
     cfg = load_config(config_path or "config.toml")
 
     s = Settings()
