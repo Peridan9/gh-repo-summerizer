@@ -1,90 +1,49 @@
 # ghsum – GitHub Repository Summarizer
 
-`ghsum` is a comprehensive tool for summarizing GitHub repositories that can be used both as a command-line tool and as a Python SDK. It supports multiple summarization backends and flexible output formats.
+A small CLI and Python SDK to generate short, readable summaries for GitHub repositories.
+Works with a no-LLM fallback (deterministic) or a local Ollama model.
 
-## Architecture
-
-The project is organized into two main modules:
-- **`ghsum/core/`**: Core business logic (GitHub API, summarization, configuration)
-- **`ghsum/cli/`**: Command-line interface implementation
-
-This structure enables both CLI usage and SDK integration in your Python projects.
-
-## Features
-
-### CLI Tool
-- Summarize all repos for a GitHub user
-- Output as JSON or Markdown
-- Optional README excerpt or full README inclusion
-- Language highlights (top languages)
-- Two summary modes:
-  - Basic: deterministic, no LLM, zero network beyond GitHub API
-  - Ollama: use your local model (e.g., `llama3.2:3b`)
-
-### Python SDK
-- Import and use core functionality in your Python projects
-- Access GitHub API utilities directly
-- Use summarization backends programmatically
-- Flexible configuration management
-
-## Installation
-
-Prereqs: Python 3.12+, `uv` or `pip`.
-
-Using uv (recommended):
-```bash
-uv sync
-uv run ghsum --help
-```
-
-Using pip:
+Quick start
+1. install
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e .
-ghsum --help
 ```
 
-## Quick start
-
-### CLI Usage
-
-Summarize a user and print JSON to stdout:
+2. CLI examples (replace USERNAME with your GitHub user)
+- Summarize a user and print JSON to stdout:
 ```bash
-ghsum octocat
+ghsum USERNAME
 ```
-
-Markdown output with languages and README excerpt:
+- Markdown output including languages and README excerpt:
 ```bash
-ghsum octocat --full --format md
+ghsum USERNAME --full --format md
 ```
-
-Write JSON to a file:
+- Save JSON to a file:
 ```bash
-ghsum octocat --out out/repos.json
+ghsum USERNAME --out out/repos.json
+```
+- Run via uv (developer convenience):
+```bash
+uv run -m ghsum USERNAME --full --readme full --summarizer ollama
 ```
 
-### Python SDK Usage
-
+Python SDK usage
 ```python
 import ghsum
 
-# Get repositories for a user
-repos = ghsum.list_user_repos("octocat")
-
-# Generate basic summary
+repos = ghsum.list_user_repos("USERNAME")
 summary = ghsum.basic_summary("my-repo", "README content...")
-
-# Use Ollama summarizer
 summarizer = ghsum.get_summarizer("ollama", model="llama3.2:3b")
-summary = summarizer.summarize("my-repo", "README content...")
-
-# Load configuration
-settings = ghsum.load_settings("config.toml")
+print(summarizer.summarize("my-repo", "README content..."))
 ```
 
-## Options
+Summarizers — note on quality
+- basic: a minimal, deterministic fallback that simply extracts the first paragraph. It is intentionally simple and low-cost, but the output quality is limited — do not rely on it for public-facing summaries.
+- ollama: uses a local LLM (better quality). Recommended when you need good summaries and have an Ollama model available.
 
+Options (CLI)
 ```bash
 ghsum USERNAME [--full] [--format json|md] [--out PATH]
              [--include-forks] [--include-archived]
@@ -93,19 +52,8 @@ ghsum USERNAME [--full] [--format json|md] [--out PATH]
              [--config PATH]
 ```
 
-- `--full`: Include top languages and README excerpt.
-- `--format`: `json` (default) or `md`.
-- `--out`: Write results to a file.
-- `--include-forks`, `--include-archived`: Include those repositories.
-- `--readme`: `none` (default), `excerpt`, or `full`.
-- `--summarizer`: `basic` (no LLM) or `ollama` (local model).
-- `--model`: Ollama model name, e.g., `llama3.2:3b`.
-- `--config`: Path to a TOML config file (defaults to `./config.toml` if present).
-
-## Configuration
-
-`config.toml` allows you to set defaults. Example:
-
+Configuration
+`config.toml` lets you set defaults. Example:
 ```toml
 [summarizer]
 kind = "ollama"         # "basic" | "ollama"
@@ -114,7 +62,6 @@ num_ctx = 8192
 
 [prompt]
 template_file = "prompts/portfolio_summary.txt"
-version = "v1"
 
 [cache]
 dir = ".cache"
@@ -124,21 +71,18 @@ include_forks = false
 include_archived = false
 ```
 
-Environment variables override config values where applicable:
-- `GITHUB_TOKEN`: Auth token for higher GitHub API rate limits.
-- `OLLAMA_BASE_URL`: Base URL for local Ollama server (default `http://localhost:11434`).
-- `SUMMARIZER`, `SUMMARY_MODEL`, `SUMMARY_NUM_CTX`: Override summarizer defaults.
+Environment variables override config where applicable:
+- `GITHUB_TOKEN` — GitHub API token for higher rate limits
+- `OLLAMA_BASE_URL` — Ollama server URL (default `http://localhost:11434`)
+- `LANGFUSE_*` — Langfuse tracing keys (optional)
 
-## Prompt customization
-
-If you provide a `prompt.template_file` in `config.toml`, it will be used with placeholders:
+Prompt customization
+If `prompt.template_file` is set, placeholders available are:
 - `{repo_name}`
 - `{description}`
 - `{text}` (cleaned README or description)
 
-See `prompts/portfolio_summary.txt` for a default template.
-
-## Output examples
+Output examples
 
 Markdown:
 ```md
@@ -158,41 +102,25 @@ JSON:
 ]
 ```
 
-## Development
+Development notes
+- There are currently no automated tests included. If you add unit tests, use `pytest`.
+- Use a feature branch for larger changes and run the CLI locally with `uv run -m ghsum ...` to validate.
 
-Run locally with uv:
-```bash
-uv run ghsum octocat --full --format md
+Project layout (brief)
+```
+ghsum/                      # top-level package
+├── __main__.py              # CLI entrypoint (python -m ghsum)
+├── __init__.py              # SDK-friendly exports (light facade)
+├── cli/
+│   └── main.py              # CLI argument parsing and invocation
+├── core/
+│   ├── __init__.py          # public core exports (get_summarizer, basic_summary, ...)
+│   ├── github.py            # GitHub API helpers (list_user_repos, get_readme, ...)
+│   ├── summarizer.py        # Summarizer implementations (basic, Ollama/LangChain, parsers)
+│   └── config.py            # config loading and Settings dataclass
+└── prompts/                  # customizable prompt templates (important)
+    └── portfolio_summary.txt # default prompt template used by summarizers
 ```
 
-### Project Structure
-
-```
-ghsum/
-├── __init__.py          # Main package with SDK exports
-├── __main__.py          # Module entry point (python -m ghsum)
-├── cli/                 # CLI functionality
-│   ├── __init__.py
-│   └── main.py          # CLI main function
-└── core/                # Core business logic (SDK)
-    ├── __init__.py
-    ├── config.py        # Configuration management
-    ├── github.py        # GitHub API interactions
-    └── summarizer.py    # Repository summarization
-```
-
-### SDK Development
-
-The core module is designed for easy integration:
-
-```python
-from ghsum.core import list_user_repos, get_summarizer, basic_summary
-
-# Direct core imports for advanced usage
-repos = list_user_repos("username", include_forks=False)
-summarizer = get_summarizer("ollama", model="llama3.2:3b")
-```
-
-## License
-
+License
 MIT
